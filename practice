@@ -1,0 +1,370 @@
+#include <iostream>
+#include <fstream>
+#include <string>
+using namespace std;
+
+// Структура для хранения таблицы
+struct Table {
+    string name;
+    string* columns;
+    string** rows;
+    int columnCount;
+    int rowCount;
+    int rowCapacity;
+
+    Table() : columns(nullptr), rows(nullptr), columnCount(0), rowCount(0), rowCapacity(0) {}
+    
+    ~Table() {
+        delete[] columns;
+        for (int i = 0; i < rowCount; ++i) {
+            delete[] rows[i];
+        }
+        delete[] rows;
+    }
+};
+
+// Тип для хранения нескольких таблиц
+struct Database {
+    Table tables[100];  // Массив для хранения до 100 таблиц
+    int tableCount = 0; // Счетчик таблиц
+};
+
+// Функция для создания таблицы
+void createTable(Database &db, const string &name, const string* columns, int columnCount) {
+    Table& table = db.tables[db.tableCount++];
+    table.name = name;
+    table.columns = new string[columnCount];
+    table.columnCount = columnCount;
+    for (int i = 0; i < columnCount; ++i) {
+        table.columns[i] = columns[i];
+    }
+    table.rows = new string*[10];  // Начальная емкость для строк
+    table.rowCapacity = 10;
+    table.rowCount = 0;
+}
+
+// Функция для вставки данных в таблицу
+void insertInto(Database &db, const string &tableName, const string* values, int valueCount) {
+    for (int i = 0; i < db.tableCount; ++i) {
+        if (db.tables[i].name == tableName) {
+            Table& table = db.tables[i];
+
+            if (table.rowCount >= table.rowCapacity) {
+                // Увеличиваем емкость, если она достигнута
+                string** newRows = new string*[table.rowCapacity * 2];
+                for (int j = 0; j < table.rowCount; ++j) {
+                    newRows[j] = table.rows[j];
+                }
+                delete[] table.rows;
+                table.rows = newRows;
+                table.rowCapacity *= 2;
+            }
+
+            // Создаем новую строку
+            table.rows[table.rowCount] = new string[valueCount];
+            for (int j = 0; j < valueCount; ++j) {
+                table.rows[table.rowCount][j] = values[j];
+            }
+            ++table.rowCount;
+            return;
+        }
+    }
+}
+
+// Утилита для разбиения строки на части
+string* split(const string &str, char delimiter, int &count) {
+    string* tokens = new string[100];  // Массив для хранения частей
+    count = 0;
+    size_t start = 0;
+    size_t end;
+
+    while ((end = str.find(delimiter, start)) != string::npos) {
+        tokens[count++] = str.substr(start, end - start);
+        start = end + 1;
+    }
+    tokens[count++] = str.substr(start); // Добавляем последний токен
+    return tokens;
+}
+
+// Функция для фильтрации данных с использованием WHERE
+bool applyCondition(const string &cell, const string &condition) {
+    return cell == condition;
+}
+
+// Функция для выполнения выборки с фильтрацией WHERE
+void selectFrom(const Database &db, const string* selectedColumns, int selectedColumnCount, const string* tableNames, int tableCount, const string &whereCondition = "", const string &logic = "AND") {
+    for (int t = 0; t < tableCount; ++t) {
+        for (int i = 0; i < db.tableCount; ++i) {
+            if (db.tables[i].name == tableNames[t]) {
+                const Table& table = db.tables[i];
+
+                int* indices = new int[selectedColumnCount];
+                for (int j = 0; j < selectedColumnCount; ++j) {
+                    string tableColumn = selectedColumns[j].substr(0, selectedColumns[j].find('.'));
+                    string column = selectedColumns[j].substr(selectedColumns[j].find('.') + 1);
+                    if (tableNames[t] == tableColumn) {
+                        bool found = false;
+                        for (int k = 0; k < table.columnCount; ++k) {
+                            if (table.columns[k] == column) {
+                                indices[j] = k;
+                                found = true;
+                                break;
+                            }
+                        }
+                        if (!found) {
+                            cerr << "Column '" << column << "' does not exist in table '" << tableNames[t] << "'." << endl;
+                            delete[] indices;
+                            return;
+                        }
+                    }
+                }
+
+                for (int r = 0; r < table.rowCount; ++r) {
+                    bool rowMatches = true;
+                    if (!whereCondition.empty()) {
+                        int count;
+                        string* conditionTokens = split(whereCondition, '=', count);
+                        string whereColumn = conditionTokens[0];
+                        string whereValue = conditionTokens[1];
+
+                        int whereColIndex = -1;
+                        for (int k = 0; k < table.columnCount; ++k) {
+                            if (table.columns[k] == whereColumn) {
+                                whereColIndex = k;
+                                break;
+                            }
+                        }
+
+                        if (whereColIndex != -1) {
+                            rowMatches = applyCondition(table.rows[r][whereColIndex], whereValue);
+                        }
+                        delete[] conditionTokens;
+                    }
+
+                    if (rowMatches) {
+                        for (int j = 0; j < selectedColumnCount; ++j) {
+                            cout << table.rows[r][indices[j]] << "\t";
+                        }
+                        cout << endl;
+                    }
+                }
+                delete[] indices;
+            }
+        }
+    }
+}
+
+// Функция для удаления данных с условием WHERE
+void deleteFrom(Database &db, const string &tableName, const string &whereCondition) {
+    for (int i = 0; i < db.tableCount; ++i) {
+        if (db.tables[i].name == tableName) {
+            Table &table = db.tables[i];
+
+            int count;
+            string* conditionTokens = split(whereCondition, '=', count);
+            string whereColumn = conditionTokens[0];
+            string whereValue = conditionTokens[1];
+
+            int whereColIndex = -1;
+            for (int j = 0; j < table.columnCount; ++j) {
+                if (table.columns[j] == whereColumn) {
+                    whereColIndex = j;
+                    break;
+                }
+            }
+
+            if (whereColIndex != -1) {
+                int newRowCount = 0;
+                for (int r = 0; r < table.rowCount; ++r) {
+                    if (!applyCondition(table.rows[r][whereColIndex], whereValue)) {
+                        table.rows[newRowCount++] = table.rows[r];
+                    } else {
+                        delete[] table.rows[r]; // Освобождение памяти
+                    }
+                }
+                table.rowCount = newRowCount;
+            }
+
+            delete[] conditionTokens;
+            return;
+        }
+    }
+}
+
+// Функция для вывода всей таблицы
+void showTable(const Database &db, const string &tableName) {
+    for (int i = 0; i < db.tableCount; ++i) {
+        if (db.tables[i].name == tableName) {
+            const Table &table = db.tables[i];
+
+            for (int j = 0; j < table.columnCount; ++j) {
+                cout << table.columns[j] << "\t";
+            }
+            cout << endl;
+
+            for (int r = 0; r < table.rowCount; ++r) {
+                for (int j = 0; j < table.columnCount; ++j) {
+                    cout << table.rows[r][j] << "\t";
+                }
+                cout << endl;
+            }
+            return;
+        }
+    }
+}
+
+// Функция для сохранения таблицы в файл JSON
+void saveTableToJson(const Database &db, const string &tableName, const string &filename) {
+    for (int i = 0; i < db.tableCount; ++i) {
+        if (db.tables[i].name == tableName) {
+            const Table &table = db.tables[i];
+            ofstream file(filename);
+
+            if (file.is_open()) {
+                file << "{\n";
+                file << "  \"columns\": [";
+
+                for (int j = 0; j < table.columnCount; ++j) {
+                    file << "\"" << table.columns[j] << "\"";
+                    if (j < table.columnCount - 1) {
+                        file << ", ";
+                    }
+                }
+                file << "],\n";
+
+                file << "  \"rows\": [\n";
+                for (int j = 0; j < table.rowCount; ++j) {
+                    file << "    {";
+                    for (int k = 0; k < table.columnCount; ++k) {
+                        file << "\"" << table.columns[k] << "\": \"" << table.rows[j][k] << "\"";
+                        if (k < table.columnCount - 1) {
+                            file << ", ";
+                        }
+                    }
+                    file << "}";
+                    if (j < table.rowCount - 1) {
+                        file << ",";
+                    }
+                    file << "\n";
+                }
+                file << "  ]\n";
+                file << "}\n";
+
+                file.close();
+                cout << "Table '" << tableName << "' saved to '" << filename << "'." << endl;
+            } else {
+                cerr << "Unable to open file for writing." << endl;
+            }
+            return;
+        }
+    }
+}
+
+// Функция для разбора SQL-запроса
+void parseSQL(const string &query, Database &db) {
+    string command;
+    size_t pos = query.find(' ');
+    command = query.substr(0, pos);
+
+    if (command == "SELECT") {
+        size_t fromPos = query.find("FROM");
+        string selectPart = query.substr(pos + 1, fromPos - pos - 1);
+        string tableNameList = query.substr(fromPos + 5);
+        
+        int selectedColumnCount, tableCount;
+        string* selectedColumns = split(selectPart, ',', selectedColumnCount);
+        string* tableNames = split(tableNameList, ',', tableCount);
+
+        size_t wherePos = query.find("WHERE");
+        string condition = "";
+        if (wherePos != string::npos) {
+            condition = query.substr(wherePos + 6); // Удаляем "WHERE "
+        }
+
+        selectFrom(db, selectedColumns, selectedColumnCount, tableNames, tableCount, condition);
+
+        delete[] selectedColumns;
+        delete[] tableNames;
+    } 
+    else if (command == "INSERT") {
+        string into, tableName, valuesPart;
+        size_t intoPos = query.find("INTO");
+        size_t valuesPos = query.find("VALUES");
+
+        tableName = query.substr(intoPos + 5, valuesPos - intoPos - 6);
+        valuesPart = query.substr(valuesPos + 7);
+
+        if (valuesPart.front() == '(' && valuesPart.back() == ')') {
+            valuesPart = valuesPart.substr(1, valuesPart.size() - 2);
+        } else {
+            cerr << "VALUES should be enclosed in parentheses." << endl;
+            return;
+        }
+
+        int valueCount;
+        string* values = split(valuesPart, ',', valueCount);
+        insertInto(db, tableName, values, valueCount);
+
+        saveTableToJson(db, tableName, tableName + ".json");
+
+        delete[] values;
+    } 
+    else if (command == "DELETE") {
+        string from, tableName, wherePart, condition;
+        size_t fromPos = query.find("FROM");
+        size_t wherePos = query.find("WHERE");
+
+        tableName = query.substr(fromPos + 5, wherePos - fromPos - 6);
+        condition = query.substr(wherePos + 6);
+
+        deleteFrom(db, tableName, condition);
+
+        saveTableToJson(db, tableName, tableName + ".json");
+    } 
+    else if (command == "SHOW") {
+        string tableName;
+        tableName = query.substr(5); // Удаляем "SHOW "
+
+        showTable(db, tableName);
+    } 
+    else if (command == "EXIT") {
+        cout << "Exiting program." << endl;
+        exit(0);
+    } 
+    else {
+        cerr << "Unknown command: " << command << endl;
+    }
+}
+
+int main() {
+    Database db;
+
+    string usersColumns[] = {"id", "name", "email"};
+    string ordersColumns[] = {"order_id", "user_id", "product"};
+
+    createTable(db, "users", usersColumns, 3);
+    createTable(db, "orders", ordersColumns, 3);
+
+    string usersRow1[] = {"1", "Alice", "alice@example.com"};
+    string usersRow2[] = {"2", "Bob", "bob@example.com"};
+    insertInto(db, "users", usersRow1, 3);
+    insertInto(db, "users", usersRow2, 3);
+
+    string ordersRow1[] = {"101", "1", "Laptop"};
+    string ordersRow2[] = {"102", "2", "Phone"};
+    insertInto(db, "orders", ordersRow1, 3);
+    insertInto(db, "orders", ordersRow2, 3);
+
+    saveTableToJson(db, "users", "users.json");
+    saveTableToJson(db, "orders", "orders.json");
+
+    while (true) {
+        string query;
+        cout << "Enter SQL query (or EXIT to quit): ";
+        getline(cin, query);
+
+        parseSQL(query, db);
+    }
+
+    return 0;
+}
