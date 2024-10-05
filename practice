@@ -345,13 +345,13 @@ int main() {
     createTable(db, "users", usersColumns, 3);
     createTable(db, "orders", ordersColumns, 3);
 
-    string usersRow1[] = {"1", "Alice", "alice@example.com"};
-    string usersRow2[] = {"2", "Bob", "bob@example.com"};
+    string usersRow1[] = {"1", "Nikita", "Nikita@example.com"};
+    string usersRow2[] = {"2", "Oleg", "Oleg@example.com"};
     insertInto(db, "users", usersRow1, 3);
     insertInto(db, "users", usersRow2, 3);
 
-    string ordersRow1[] = {"101", "1", "Laptop"};
-    string ordersRow2[] = {"102", "2", "Phone"};
+    string ordersRow1[] = {"101", "1", "Houses"};
+    string ordersRow2[] = {"102", "2", "Furniture"};
     insertInto(db, "orders", ordersRow1, 3);
     insertInto(db, "orders", ordersRow2, 3);
 
