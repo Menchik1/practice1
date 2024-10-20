@@ -1,370 +1,406 @@
 #include <iostream>
 #include <fstream>
-#include <string>
+#include <direct.h> // Для _mkdir
+#include <iomanip>
+#include <sstream>
+#include "json.hpp"
+
 using namespace std;
+using json = nlohmann::json;
 
-// Структура для хранения таблицы
-struct Table {
+struct Node {
     string name;
-    string* columns;
-    string** rows;
-    int columnCount;
-    int rowCount;
-    int rowCapacity;
+    json data;
+    Node* next;
 
-    Table() : columns(nullptr), rows(nullptr), columnCount(0), rowCount(0), rowCapacity(0) {}
-    
-    ~Table() {
-        delete[] columns;
-        for (int i = 0; i < rowCount; ++i) {
-            delete[] rows[i];
-        }
-        delete[] rows;
-    }
+    Node(const string& name) : name(name), next(nullptr) {}
 };
 
-// Тип для хранения нескольких таблиц
 struct Database {
-    Table tables[100];  // Массив для хранения до 100 таблиц
-    int tableCount = 0; // Счетчик таблиц
+    string filename; 
+    string schema_name;
+    Node* head;
+
+    Database() : head(nullptr) {}
+
+    ~Database() {
+        // Освобождение памяти
+        while (head) {
+            Node* temp = head;
+            head = head->next;
+            delete temp;
+        }
+    }
+
+    void loadSchema(const string& schema_file) {
+        ifstream file(schema_file);
+        if (file) {
+            json schema;
+            file >> schema;
+            schema_name = schema["name"];
+            createDirectories(schema["structure"]);
+            // Инициализация узлов для каждой таблицы в схеме
+            for (const auto& table : schema["structure"].items()) {
+                addNode(table.key());
+            }
+        } else {
+            cerr << "Could not open schema file." << endl;
+        }
+    }
+
+    void createDirectories(const json& structure) {
+        _mkdir(schema_name.c_str());
+
+        for (const auto& table : structure.items()) {
+            string table_name = table.key();
+            string table_path = schema_name + "\\" + table_name;
+
+            _mkdir(table_path.c_str());
+            filename = table_path + "\\1.csv"; // Установка пути к 1.csv
+
+            // Создание файла, если он не существует
+            ifstream check_file(filename);
+            if (!check_file) {
+                ofstream file(filename);
+                if (file.is_open()) {
+                    // Запись заголовков на основе схемы
+                    auto& columns = table.value();
+                    for (size_t i = 0; i < columns.size(); ++i) {
+                        file << "| " << setw(10) << left << columns[i].get<string>() << " ";
+                    }
+                    file << "|\n"; // Завершение строки заголовка
+                    file.close();
+                }
+            }
+
+            // Создание файла для первичного ключа
+            ofstream pk_file(table_path + "\\" + table_name + "_pk_sequence");
+            pk_file << 0; // Начальное значение первичного ключа
+            pk_file.close();
+        }
+    }
+
+    void addNode(const string& table_name) {
+        Node* new_node = new Node(table_name);
+        new_node->next = head;
+        head = new_node;
+    }
+
+    Node* findNode(const string& table_name) {
+        Node* current = head;
+        while (current) {
+            if (current->name == table_name) {
+                return current;
+            }
+            current = current->next;
+        }
+        return nullptr;
+    }
+void initializePrimaryKey(const string& table) {
+    string pk_filename = schema_name + "\\" + table + "\\" + table + "_pk_sequence";
+    int current_pk = 0; // Начальное значение, если файл создается впервые
+
+    // Проверяем, существует ли файл
+    ifstream pk_file(pk_filename);
+    if (pk_file.is_open()) {
+        // Если файл существует, считываем текущее значение
+        pk_file >> current_pk;
+        pk_file.close();
+    } else {
+        // Если файл не существует, создадим его и установим начальное значение
+        ofstream new_pk_file(pk_filename);
+        if (new_pk_file.is_open()) {
+            new_pk_file << current_pk; // Записываем 0 как начальное значение
+            new_pk_file.close();
+        } else {
+            cerr << "Ошибка при создании файла: " << pk_filename << endl;
+            return;
+        }
+    }
+
+    // Увеличиваем первичный ключ
+    current_pk++;
+
+    // Записываем новое значение обратно в файл
+    ofstream pk_out(pk_filename);
+    if (pk_out.is_open()) {
+        pk_out << current_pk; // Записываем обновленное значение
+        pk_out.close();
+    } else {
+        cerr << "Ошибка при открытии файла для записи: " << pk_filename << endl;
+    }
+}
+
+
+
+    void load() {
+        Node* current = head; // Начинаем с головы списка таблиц
+        while (current) {
+            filename = schema_name + "\\" + current->name + "\\1.csv"; // Указываем путь к текущей таблице
+            ifstream file(filename);
+            if (file) {
+                string line;
+                bool is_header = true; // Флаг для проверки заголовка
+                while (getline(file, line)) {
+                    line.erase(0, line.find_first_not_of(" \t"));
+                    line.erase(line.find_last_not_of(" \t") + 1);
+
+                    if (is_header) {
+                        is_header = false; // Пропустить заголовок
+                        continue;
+                    }
+
+                    istringstream iss(line);
+                    vector<string> fields;
+                    string field;
+
+                    // Используем getline с разделителем '|', убираем пробелы по краям
+                    while (getline(iss, field, '|')) {
+                        field.erase(0, field.find_first_not_of(" \t"));
+                        field.erase(field.find_last_not_of(" \t") + 1);
+                        if (!field.empty()) {
+                            fields.push_back(field);
+                        }
+                    }
+
+                    if (fields.size() == 4) {
+                        json entry;
+                        entry["name"] = fields[0];
+                        entry["age"] = fields[1];
+                        entry["adress"] = fields[2];
+                        entry["number"] = fields[3];
+
+                        current->data.push_back(entry); // Хранение в памяти
+                    } else {
+                        cout << "Invalid or empty data found: " << line << endl;
+                    }
+                }
+            } else {
+                cerr << "Could not open data file: " << filename << endl;
+            }
+            current = current->next; // Переход к следующей таблице
+        }
+    }
+
+    void select(const string& column, const string& table) {
+        Node* table_node = findNode(table);
+        if (table_node) {
+            cout << "Data from " << column << " in table " << table << ":\n";
+            for (const auto& entry : table_node->data) {
+                if (entry.contains(column)) {
+                    cout << entry[column].get<string>() << endl;
+                } else {
+                    cout << "Column not found: " << column << endl;
+                    return;
+                }
+            }
+        } else {
+            cout << "Table not found: " << table << endl;
+        }
+    }
+
+    void saveSingleEntryToCSV(const string& table, const json& entry) {
+    filename = schema_name + "\\" + table + "\\1.csv"; // Обновить путь к файлу
+    ofstream file(filename, ios::app); // Открыть файл для добавления
+    if (file) {
+        // Запись данных, исключая первичный ключ
+        file << "| "  
+             << setw(10) << left << entry["name"].get<string>() << "| "  
+             << setw(10) << left << entry["age"] << "| "
+             << setw(10) << left << entry["adress"].get<string>() << "| "
+             << setw(10) << left << entry["number"].get<string>() << "|\n"; 
+        cout << "Data saved successfully for: " << entry.dump() << endl;
+    } else {
+        cerr << "Could not open data file for saving: " << filename << endl;
+    }
+}
+
+
+    bool isTableLocked(const string& table) {
+        string lock_file = schema_name + "\\" + table + "\\" + table + "_lock";
+        ifstream file(lock_file);
+        return file.good(); // Возвращает true, если файл существует
+    }
+
+    void lockTable(const string& table) {
+        string lock_file = schema_name + "\\" + table + "\\" + table + "_lock";
+        ofstream file(lock_file);
+        if (file) {
+            file.close(); // Создаем файл для блокировки
+        }
+    }
+
+    void unlockTable(const string& table) {
+        string lock_file = schema_name + "\\" + table + "\\" + table + "_lock";
+        remove(lock_file.c_str()); // Удаляем файл блокировки
+    }
+void insert(const string& table, const json& entry) {
+    if (isTableLocked(table)) {
+        cout << "Table " << table << " is locked. Please try again later." << endl;
+        return; // Выходим, если таблица заблокирована
+    }
+
+    lockTable(table); // Блокируем таблицу перед вставкой данных
+
+    Node* table_node = findNode(table);
+    if (table_node) {
+        // Чтение текущего значения первичного ключа
+        string pk_filename = schema_name + "\\" + table + "\\" + table + "_pk_sequence";
+        ifstream pk_file(pk_filename);
+        int current_pk = 0;
+
+        if (pk_file.is_open()) {
+            pk_file >> current_pk; // Считываем текущее значение
+            pk_file.close();
+        } else {
+            std::cerr << "Ошибка при открытии файла для чтения: " << pk_filename << std::endl;
+            unlockTable(table);
+            return;
+        }
+
+        // Вставка данных с новым первичным ключом
+        json entry_with_pk = entry;
+        entry_with_pk[table + "_pk"] = current_pk; // Добавляем первичный ключ
+
+        table_node->data.push_back(entry_with_pk); // Сохранение в памяти
+        cout << "Inserted: " << entry_with_pk.dump() << endl;
+
+        // Сохранение новой записи в CSV без первичного ключа
+        saveSingleEntryToCSV(table, entry_with_pk);
+
+        // Увеличиваем первичный ключ
+        current_pk++;
+        ofstream pk_out(pk_filename);
+        if (pk_out.is_open()) {
+            pk_out << current_pk; // Записываем новое значение
+            pk_out.close();
+        } else {
+            std::cerr << "Ошибка при открытии файла для записи: " << pk_filename << std::endl;
+        }
+    } else {
+        cout << "Table not found: " << table << endl;
+    }
+
+    unlockTable(table); // Разблокируем таблицу после завершения операции
+}
+
+
+
+
+
+    void deleteRow(const string& column, const string& value, const string& table) {
+        Node* table_node = findNode(table);
+        if (table_node) {
+            json new_data = json::array(); // Массив для хранения оставшихся данных
+            bool found = false;
+
+            // Проходим по данным и ищем строки для удаления
+            for (const auto& entry : table_node->data) {
+                if (entry.contains(column) && entry[column].get<string>() == value) {
+                    found = true;
+                    cout << "Deleted row: " << entry.dump() << endl;
+                } else {
+                    new_data.push_back(entry); // Сохраняем не удаленные строки
+                }
+            }
+
+            if (found) {
+                table_node->data = new_data; // Обновляем данные в памяти
+                rewriteCSV(table); // Перезаписываем CSV файл с новыми данными
+            } else {
+                cout << "No row found with " << column << " = " << value << " in table " << table << endl;
+            }
+        } else {
+            cout << "Table not found: " << table << endl;
+        }
+    }
+
+    void rewriteCSV(const string& table) {
+        filename = schema_name + "\\" + table + "\\1.csv"; // Обновить путь к файлу
+        ofstream file(filename); // Перезаписываем файл
+
+        if (file) {
+            // Получаем структуру таблицы из схемы
+            Node* table_node = findNode(table);
+            if (table_node) {
+                // Запись заголовков на основе схемы
+                json columns; // Убираем const
+
+                if (table == "table1") {
+                    columns = {"name", "age", "adress", "number"};
+                } else if (table == "table2") {
+                    columns = {"name", "age"}; // Пример для другой таблицы
+                }
+
+                // Запись заголовков
+                for (const auto& column : columns) {
+                    file << "| " << setw(10) << left << column.get<string>() << " ";
+                }
+                file << "|\n"; // Завершение строки заголовка
+
+                // Записываем данные
+                for (const auto& entry : table_node->data) {
+                    for (const auto& column : columns) {
+                        file << "| " << setw(10) << left << entry[column.get<string>()].get<string>() << " ";
+                    }
+                    file << "|\n"; // Завершение строки данных
+                }
+            }
+            file.close();
+        } else {
+            cerr << "Could not open data file for rewriting: " << filename << endl;
+        }
+    }
 };
 
-// Функция для создания таблицы
-void createTable(Database &db, const string &name, const string* columns, int columnCount) {
-    Table& table = db.tables[db.tableCount++];
-    table.name = name;
-    table.columns = new string[columnCount];
-    table.columnCount = columnCount;
-    for (int i = 0; i < columnCount; ++i) {
-        table.columns[i] = columns[i];
-    }
-    table.rows = new string*[10];  // Начальная емкость для строк
-    table.rowCapacity = 10;
-    table.rowCount = 0;
-}
+void executeQuery(Database& db, const string& query) {
+    istringstream iss(query);
+    string action;
+    iss >> action; // Читаем действие
 
-// Функция для вставки данных в таблицу
-void insertInto(Database &db, const string &tableName, const string* values, int valueCount) {
-    for (int i = 0; i < db.tableCount; ++i) {
-        if (db.tables[i].name == tableName) {
-            Table& table = db.tables[i];
-
-            if (table.rowCount >= table.rowCapacity) {
-                // Увеличиваем емкость, если она достигнута
-                string** newRows = new string*[table.rowCapacity * 2];
-                for (int j = 0; j < table.rowCount; ++j) {
-                    newRows[j] = table.rows[j];
-                }
-                delete[] table.rows;
-                table.rows = newRows;
-                table.rowCapacity *= 2;
-            }
-
-            // Создаем новую строку
-            table.rows[table.rowCount] = new string[valueCount];
-            for (int j = 0; j < valueCount; ++j) {
-                table.rows[table.rowCount][j] = values[j];
-            }
-            ++table.rowCount;
-            return;
-        }
-    }
-}
-
-// Утилита для разбиения строки на части
-string* split(const string &str, char delimiter, int &count) {
-    string* tokens = new string[100];  // Массив для хранения частей
-    count = 0;
-    size_t start = 0;
-    size_t end;
-
-    while ((end = str.find(delimiter, start)) != string::npos) {
-        tokens[count++] = str.substr(start, end - start);
-        start = end + 1;
-    }
-    tokens[count++] = str.substr(start); // Добавляем последний токен
-    return tokens;
-}
-
-// Функция для фильтрации данных с использованием WHERE
-bool applyCondition(const string &cell, const string &condition) {
-    return cell == condition;
-}
-
-// Функция для выполнения выборки с фильтрацией WHERE
-void selectFrom(const Database &db, const string* selectedColumns, int selectedColumnCount, const string* tableNames, int tableCount, const string &whereCondition = "", const string &logic = "AND") {
-    for (int t = 0; t < tableCount; ++t) {
-        for (int i = 0; i < db.tableCount; ++i) {
-            if (db.tables[i].name == tableNames[t]) {
-                const Table& table = db.tables[i];
-
-                int* indices = new int[selectedColumnCount];
-                for (int j = 0; j < selectedColumnCount; ++j) {
-                    string tableColumn = selectedColumns[j].substr(0, selectedColumns[j].find('.'));
-                    string column = selectedColumns[j].substr(selectedColumns[j].find('.') + 1);
-                    if (tableNames[t] == tableColumn) {
-                        bool found = false;
-                        for (int k = 0; k < table.columnCount; ++k) {
-                            if (table.columns[k] == column) {
-                                indices[j] = k;
-                                found = true;
-                                break;
-                            }
-                        }
-                        if (!found) {
-                            cerr << "Column '" << column << "' does not exist in table '" << tableNames[t] << "'." << endl;
-                            delete[] indices;
-                            return;
-                        }
-                    }
-                }
-
-                for (int r = 0; r < table.rowCount; ++r) {
-                    bool rowMatches = true;
-                    if (!whereCondition.empty()) {
-                        int count;
-                        string* conditionTokens = split(whereCondition, '=', count);
-                        string whereColumn = conditionTokens[0];
-                        string whereValue = conditionTokens[1];
-
-                        int whereColIndex = -1;
-                        for (int k = 0; k < table.columnCount; ++k) {
-                            if (table.columns[k] == whereColumn) {
-                                whereColIndex = k;
-                                break;
-                            }
-                        }
-
-                        if (whereColIndex != -1) {
-                            rowMatches = applyCondition(table.rows[r][whereColIndex], whereValue);
-                        }
-                        delete[] conditionTokens;
-                    }
-
-                    if (rowMatches) {
-                        for (int j = 0; j < selectedColumnCount; ++j) {
-                            cout << table.rows[r][indices[j]] << "\t";
-                        }
-                        cout << endl;
-                    }
-                }
-                delete[] indices;
-            }
-        }
-    }
-}
-
-// Функция для удаления данных с условием WHERE
-void deleteFrom(Database &db, const string &tableName, const string &whereCondition) {
-    for (int i = 0; i < db.tableCount; ++i) {
-        if (db.tables[i].name == tableName) {
-            Table &table = db.tables[i];
-
-            int count;
-            string* conditionTokens = split(whereCondition, '=', count);
-            string whereColumn = conditionTokens[0];
-            string whereValue = conditionTokens[1];
-
-            int whereColIndex = -1;
-            for (int j = 0; j < table.columnCount; ++j) {
-                if (table.columns[j] == whereColumn) {
-                    whereColIndex = j;
-                    break;
-                }
-            }
-
-            if (whereColIndex != -1) {
-                int newRowCount = 0;
-                for (int r = 0; r < table.rowCount; ++r) {
-                    if (!applyCondition(table.rows[r][whereColIndex], whereValue)) {
-                        table.rows[newRowCount++] = table.rows[r];
-                    } else {
-                        delete[] table.rows[r]; // Освобождение памяти
-                    }
-                }
-                table.rowCount = newRowCount;
-            }
-
-            delete[] conditionTokens;
-            return;
-        }
-    }
-}
-
-// Функция для вывода всей таблицы
-void showTable(const Database &db, const string &tableName) {
-    for (int i = 0; i < db.tableCount; ++i) {
-        if (db.tables[i].name == tableName) {
-            const Table &table = db.tables[i];
-
-            for (int j = 0; j < table.columnCount; ++j) {
-                cout << table.columns[j] << "\t";
-            }
-            cout << endl;
-
-            for (int r = 0; r < table.rowCount; ++r) {
-                for (int j = 0; j < table.columnCount; ++j) {
-                    cout << table.rows[r][j] << "\t";
-                }
-                cout << endl;
-            }
-            return;
-        }
-    }
-}
-
-// Функция для сохранения таблицы в файл JSON
-void saveTableToJson(const Database &db, const string &tableName, const string &filename) {
-    for (int i = 0; i < db.tableCount; ++i) {
-        if (db.tables[i].name == tableName) {
-            const Table &table = db.tables[i];
-            ofstream file(filename);
-
-            if (file.is_open()) {
-                file << "{\n";
-                file << "  \"columns\": [";
-
-                for (int j = 0; j < table.columnCount; ++j) {
-                    file << "\"" << table.columns[j] << "\"";
-                    if (j < table.columnCount - 1) {
-                        file << ", ";
-                    }
-                }
-                file << "],\n";
-
-                file << "  \"rows\": [\n";
-                for (int j = 0; j < table.rowCount; ++j) {
-                    file << "    {";
-                    for (int k = 0; k < table.columnCount; ++k) {
-                        file << "\"" << table.columns[k] << "\": \"" << table.rows[j][k] << "\"";
-                        if (k < table.columnCount - 1) {
-                            file << ", ";
-                        }
-                    }
-                    file << "}";
-                    if (j < table.rowCount - 1) {
-                        file << ",";
-                    }
-                    file << "\n";
-                }
-                file << "  ]\n";
-                file << "}\n";
-
-                file.close();
-                cout << "Table '" << tableName << "' saved to '" << filename << "'." << endl;
-            } else {
-                cerr << "Unable to open file for writing." << endl;
-            }
-            return;
-        }
-    }
-}
-
-// Функция для разбора SQL-запроса
-void parseSQL(const string &query, Database &db) {
-    string command;
-    size_t pos = query.find(' ');
-    command = query.substr(0, pos);
-
-    if (command == "SELECT") {
-        size_t fromPos = query.find("FROM");
-        string selectPart = query.substr(pos + 1, fromPos - pos - 1);
-        string tableNameList = query.substr(fromPos + 5);
-        
-        int selectedColumnCount, tableCount;
-        string* selectedColumns = split(selectPart, ',', selectedColumnCount);
-        string* tableNames = split(tableNameList, ',', tableCount);
-
-        size_t wherePos = query.find("WHERE");
-        string condition = "";
-        if (wherePos != string::npos) {
-            condition = query.substr(wherePos + 6); // Удаляем "WHERE "
-        }
-
-        selectFrom(db, selectedColumns, selectedColumnCount, tableNames, tableCount, condition);
-
-        delete[] selectedColumns;
-        delete[] tableNames;
-    } 
-    else if (command == "INSERT") {
-        string into, tableName, valuesPart;
-        size_t intoPos = query.find("INTO");
-        size_t valuesPos = query.find("VALUES");
-
-        tableName = query.substr(intoPos + 5, valuesPos - intoPos - 6);
-        valuesPart = query.substr(valuesPos + 7);
-
-        if (valuesPart.front() == '(' && valuesPart.back() == ')') {
-            valuesPart = valuesPart.substr(1, valuesPart.size() - 2);
+    if (action == "INSERT" || action == "insert") {
+        string table, name, adress, number;
+        int age;
+        iss >> table >> name >> age >> adress >> number; // Извлекаем таблицу и данные
+        json entry = {{"name", name}, {"age", age}, {"adress", adress}, {"number", number}};
+        db.insert(table, entry); // Вставка данных
+    } else if (action == "SELECT" || action == "select") {
+        string column, from, table;
+        iss >> column >> from >> table; // Извлекаем колонку и таблицу
+        if (from == "FROM") {
+            db.select(column, table); // Выполняем выборку
         } else {
-            cerr << "VALUES should be enclosed in parentheses." << endl;
-            return;
+            cout << "Invalid query format." << endl;
         }
-
-        int valueCount;
-        string* values = split(valuesPart, ',', valueCount);
-        insertInto(db, tableName, values, valueCount);
-
-        saveTableToJson(db, tableName, tableName + ".json");
-
-        delete[] values;
-    } 
-    else if (command == "DELETE") {
-        string from, tableName, wherePart, condition;
-        size_t fromPos = query.find("FROM");
-        size_t wherePos = query.find("WHERE");
-
-        tableName = query.substr(fromPos + 5, wherePos - fromPos - 6);
-        condition = query.substr(wherePos + 6);
-
-        deleteFrom(db, tableName, condition);
-
-        saveTableToJson(db, tableName, tableName + ".json");
-    } 
-    else if (command == "SHOW") {
-        string tableName;
-        tableName = query.substr(5); // Удаляем "SHOW "
-
-        showTable(db, tableName);
-    } 
-    else if (command == "EXIT") {
-        cout << "Exiting program." << endl;
-        exit(0);
-    } 
-    else {
-        cerr << "Unknown command: " << command << endl;
+    } else if (action == "DELETE" || action == "delete") {
+        string column, from, value, table;
+        iss >> from >> table >> column >> value; // Извлекаем параметры удаления
+        db.deleteRow(column, value, table); // Удаление строки
+    } else {
+        cout << "Unknown command: " << query << endl;
     }
 }
 
-int main() {
+int main(int argc, char* argv[]) {
     Database db;
+    db.loadSchema("schema.json"); // Загрузить схему
 
-    string usersColumns[] = {"id", "name", "email"};
-    string ordersColumns[] = {"order_id", "user_id", "product"};
+    db.load(); // Загрузить данные из CSV
 
-    createTable(db, "users", usersColumns, 3);
-    createTable(db, "orders", ordersColumns, 3);
+    // Инициализация первичного ключа для каждой таблицы
+    Node* current = db.head;
+    while (current) {
+        db.initializePrimaryKey(current->name); // Инициализация первичного ключа
+        current = current->next;
+    }
 
-    string usersRow1[] = {"1", "Nikita", "Nikita@example.com"};
-    string usersRow2[] = {"2", "Oleg", "Oleg@example.com"};
-    insertInto(db, "users", usersRow1, 3);
-    insertInto(db, "users", usersRow2, 3);
-
-    string ordersRow1[] = {"101", "1", "Houses"};
-    string ordersRow2[] = {"102", "2", "Furniture"};
-    insertInto(db, "orders", ordersRow1, 3);
-    insertInto(db, "orders", ordersRow2, 3);
-
-    saveTableToJson(db, "users", "users.json");
-    saveTableToJson(db, "orders", "orders.json");
-
-    while (true) {
-        string query;
-        cout << "Enter SQL query (or EXIT to quit): ";
-        getline(cin, query);
-
-        parseSQL(query, db);
+    if (argc > 1) {
+        string query = argv[2];
+        executeQuery(db, query); // Выполнение команды
+    } else {
+        cout << "Please provide a query to execute." << endl;
     }
 
     return 0;
 }
+
