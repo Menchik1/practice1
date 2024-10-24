@@ -20,11 +20,11 @@ struct Database {
     string filename; 
     string schema_name;
     Node* head;
+    int current_pk;
 
-    Database() : head(nullptr) {}
+    Database() : head(nullptr), current_pk(0) {}
 
     ~Database() {
-        // Освобождение памяти
         while (head) {
             Node* temp = head;
             head = head->next;
@@ -39,12 +39,50 @@ struct Database {
             file >> schema;
             schema_name = schema["name"];
             createDirectories(schema["structure"]);
-            // Инициализация узлов для каждой таблицы в схеме
             for (const auto& table : schema["structure"].items()) {
                 addNode(table.key());
             }
         } else {
-            cerr << "Could not open schema file." << endl;
+            cerr << "Не удалось открыть файл схемы." << endl;
+        }
+    }
+
+    void initializePrimaryKey(const string& table) {
+        string pk_filename = schema_name + "\\" + table + "\\table_pk_sequence.txt";
+        ifstream pk_file(pk_filename);
+        
+        if (pk_file) {
+            pk_file >> current_pk;
+        } else {
+            ofstream pk_file_out(pk_filename);
+            if (pk_file_out) {
+                pk_file_out << 0;
+            } else {
+                cerr << "Не удалось создать файл первичного ключа: " << pk_filename << endl;
+            }
+        }
+    }
+
+    void updatePrimaryKey(const string& table) {
+        string pk_filename = schema_name + "\\" + table + "\\table_pk_sequence.txt";
+        ifstream pk_file(pk_filename);
+        
+        int pk_value = 0;
+        if (pk_file) {
+            pk_file >> pk_value;
+        }
+        pk_file.close();
+
+        pk_value++;
+        current_pk = pk_value;
+
+        cout << "Обновление файла PK: " << pk_filename << " с новым значением: " << current_pk << endl;
+        
+        ofstream pk_file_out(pk_filename);
+        if (pk_file_out) {
+            pk_file_out << current_pk;
+        } else {
+            cerr << "Не удалось открыть файл первичного ключа для обновления: " << pk_filename << endl;
         }
     }
 
@@ -56,27 +94,22 @@ struct Database {
             string table_path = schema_name + "\\" + table_name;
 
             _mkdir(table_path.c_str());
-            filename = table_path + "\\1.csv"; // Установка пути к 1.csv
+            filename = table_path + "\\1.csv";
 
-            // Создание файла, если он не существует
             ifstream check_file(filename);
             if (!check_file) {
                 ofstream file(filename);
                 if (file.is_open()) {
-                    // Запись заголовков на основе схемы
                     auto& columns = table.value();
                     for (size_t i = 0; i < columns.size(); ++i) {
-                        file << "| " << setw(10) << left << columns[i].get<string>() << " ";
+                        file << setw(10) << left << columns[i].get<string>() << (i < columns.size() - 1 ? ", " : "");
                     }
-                    file << "|\n"; // Завершение строки заголовка
+                    file << "\n"; // Завершение строки заголовка
                     file.close();
                 }
             }
 
-            // Создание файла для первичного ключа
-            ofstream pk_file(table_path + "\\" + table_name + "_pk_sequence");
-            pk_file << 0; // Начальное значение первичного ключа
-            pk_file.close();
+            initializePrimaryKey(table_name);
         }
     }
 
@@ -96,259 +129,161 @@ struct Database {
         }
         return nullptr;
     }
-void initializePrimaryKey(const string& table) {
-    string pk_filename = schema_name + "\\" + table + "\\" + table + "_pk_sequence";
-    int current_pk = 0; // Начальное значение, если файл создается впервые
-
-    // Проверяем, существует ли файл
-    ifstream pk_file(pk_filename);
-    if (pk_file.is_open()) {
-        // Если файл существует, считываем текущее значение
-        pk_file >> current_pk;
-        pk_file.close();
-    } else {
-        // Если файл не существует, создадим его и установим начальное значение
-        ofstream new_pk_file(pk_filename);
-        if (new_pk_file.is_open()) {
-            new_pk_file << current_pk; // Записываем 0 как начальное значение
-            new_pk_file.close();
-        } else {
-            cerr << "Ошибка при создании файла: " << pk_filename << endl;
-            return;
-        }
-    }
-
-    // Увеличиваем первичный ключ
-    current_pk++;
-
-    // Записываем новое значение обратно в файл
-    ofstream pk_out(pk_filename);
-    if (pk_out.is_open()) {
-        pk_out << current_pk; // Записываем обновленное значение
-        pk_out.close();
-    } else {
-        cerr << "Ошибка при открытии файла для записи: " << pk_filename << endl;
-    }
-}
-
-
 
     void load() {
-        Node* current = head; // Начинаем с головы списка таблиц
+        Node* current = head;
         while (current) {
-            filename = schema_name + "\\" + current->name + "\\1.csv"; // Указываем путь к текущей таблице
+            filename = schema_name + "\\" + current->name + "\\1.csv"; 
             ifstream file(filename);
             if (file) {
                 string line;
-                bool is_header = true; // Флаг для проверки заголовка
+                bool is_header = true;
                 while (getline(file, line)) {
                     line.erase(0, line.find_first_not_of(" \t"));
                     line.erase(line.find_last_not_of(" \t") + 1);
 
                     if (is_header) {
-                        is_header = false; // Пропустить заголовок
+                        is_header = false;
                         continue;
                     }
 
                     istringstream iss(line);
-                    vector<string> fields;
+                    string fields[4]; // Массив для хранения полей
+                    int field_count = 0; // Счетчик полей
                     string field;
 
-                    // Используем getline с разделителем '|', убираем пробелы по краям
-                    while (getline(iss, field, '|')) {
+                    while (getline(iss, field, ',')) {
                         field.erase(0, field.find_first_not_of(" \t"));
                         field.erase(field.find_last_not_of(" \t") + 1);
-                        if (!field.empty()) {
-                            fields.push_back(field);
+                        if (!field.empty() && field_count < 4) {
+                            fields[field_count++] = field; // Запись поля в массив
                         }
                     }
 
-                    if (fields.size() == 4) {
+                    if (field_count == 4) {
                         json entry;
                         entry["name"] = fields[0];
                         entry["age"] = fields[1];
                         entry["adress"] = fields[2];
                         entry["number"] = fields[3];
 
-                        current->data.push_back(entry); // Хранение в памяти
+                        current->data.push_back(entry);
                     } else {
-                        cout << "Invalid or empty data found: " << line << endl;
+                        cout << "Найдены недопустимые или пустые данные: " << line << endl;
                     }
                 }
             } else {
-                cerr << "Could not open data file: " << filename << endl;
+                cerr << "Не удалось открыть файл данных: " << filename << endl;
             }
-            current = current->next; // Переход к следующей таблице
+            current = current->next;
         }
     }
 
-    void select(const string& column, const string& table) {
+    void select(const string& column, const string& table, const pair<string, string> filters[], int filter_count) { // Используем массив фильтров
         Node* table_node = findNode(table);
         if (table_node) {
-            cout << "Data from " << column << " in table " << table << ":\n";
+            cout << "Данные из " << column << " в " << table << ":\n";
             for (const auto& entry : table_node->data) {
-                if (entry.contains(column)) {
+                bool valid_row = true;
+
+                for (int i = 0; i < filter_count; ++i) {
+                    const string& filter_column = filters[i].first;
+                    const string& filter_value = filters[i].second;
+
+                    if (entry.contains(filter_column) && entry[filter_column].get<string>() != filter_value) {
+                        valid_row = false;
+                        break;
+                    }
+                }
+
+                if (valid_row && entry.contains(column)) {
                     cout << entry[column].get<string>() << endl;
-                } else {
-                    cout << "Column not found: " << column << endl;
-                    return;
                 }
             }
         } else {
-            cout << "Table not found: " << table << endl;
+            cout << "Таблица не найдена: " << table << endl;
         }
     }
 
     void saveSingleEntryToCSV(const string& table, const json& entry) {
-    filename = schema_name + "\\" + table + "\\1.csv"; // Обновить путь к файлу
-    ofstream file(filename, ios::app); // Открыть файл для добавления
-    if (file) {
-        // Запись данных, исключая первичный ключ
-        file << "| "  
-             << setw(10) << left << entry["name"].get<string>() << "| "  
-             << setw(10) << left << entry["age"] << "| "
-             << setw(10) << left << entry["adress"].get<string>() << "| "
-             << setw(10) << left << entry["number"].get<string>() << "|\n"; 
-        cout << "Data saved successfully for: " << entry.dump() << endl;
-    } else {
-        cerr << "Could not open data file for saving: " << filename << endl;
-    }
-}
-
-
-    bool isTableLocked(const string& table) {
-        string lock_file = schema_name + "\\" + table + "\\" + table + "_lock";
-        ifstream file(lock_file);
-        return file.good(); // Возвращает true, если файл существует
-    }
-
-    void lockTable(const string& table) {
-        string lock_file = schema_name + "\\" + table + "\\" + table + "_lock";
-        ofstream file(lock_file);
+        filename = schema_name + "\\" + table + "\\1.csv"; 
+        ofstream file(filename, ios::app);
         if (file) {
-            file.close(); // Создаем файл для блокировки
-        }
-    }
-
-    void unlockTable(const string& table) {
-        string lock_file = schema_name + "\\" + table + "\\" + table + "_lock";
-        remove(lock_file.c_str()); // Удаляем файл блокировки
-    }
-void insert(const string& table, const json& entry) {
-    if (isTableLocked(table)) {
-        cout << "Table " << table << " is locked. Please try again later." << endl;
-        return; // Выходим, если таблица заблокирована
-    }
-
-    lockTable(table); // Блокируем таблицу перед вставкой данных
-
-    Node* table_node = findNode(table);
-    if (table_node) {
-        // Чтение текущего значения первичного ключа
-        string pk_filename = schema_name + "\\" + table + "\\" + table + "_pk_sequence";
-        ifstream pk_file(pk_filename);
-        int current_pk = 0;
-
-        if (pk_file.is_open()) {
-            pk_file >> current_pk; // Считываем текущее значение
-            pk_file.close();
+            file << setw(10) << left << entry["name"].get<string>() << ", "  
+                 << setw(10) << left << entry["age"] << ", "
+                 << setw(10) << left << entry["adress"].get<string>() << ", "
+                 << setw(10) << left << entry["number"].get<string>() << "\n"; 
+            cout << "Данные успешно сохранены для: " << entry.dump() << endl;
         } else {
-            std::cerr << "Ошибка при открытии файла для чтения: " << pk_filename << std::endl;
-            unlockTable(table);
-            return;
+            cerr << "Не удалось открыть файл данных для сохранения: " << filename << endl;
         }
-
-        // Вставка данных с новым первичным ключом
-        json entry_with_pk = entry;
-        entry_with_pk[table + "_pk"] = current_pk; // Добавляем первичный ключ
-
-        table_node->data.push_back(entry_with_pk); // Сохранение в памяти
-        cout << "Inserted: " << entry_with_pk.dump() << endl;
-
-        // Сохранение новой записи в CSV без первичного ключа
-        saveSingleEntryToCSV(table, entry_with_pk);
-
-        // Увеличиваем первичный ключ
-        current_pk++;
-        ofstream pk_out(pk_filename);
-        if (pk_out.is_open()) {
-            pk_out << current_pk; // Записываем новое значение
-            pk_out.close();
-        } else {
-            std::cerr << "Ошибка при открытии файла для записи: " << pk_filename << std::endl;
-        }
-    } else {
-        cout << "Table not found: " << table << endl;
     }
 
-    unlockTable(table); // Разблокируем таблицу после завершения операции
-}
+    void insert(const string& table, json entry) {
+        Node* table_node = findNode(table);
+        if (table_node) {
+            updatePrimaryKey(table);
+            entry["id"] = current_pk;
 
+            table_node->data.push_back(entry);
+            cout << "Вставлено: " << entry.dump() << endl;
 
-
-
+            saveSingleEntryToCSV(table, entry); 
+        } else {
+            cout << "Таблица не найдена: " << table << endl;
+        }
+    }
 
     void deleteRow(const string& column, const string& value, const string& table) {
         Node* table_node = findNode(table);
         if (table_node) {
-            json new_data = json::array(); // Массив для хранения оставшихся данных
+            json new_data = json::array();
             bool found = false;
 
-            // Проходим по данным и ищем строки для удаления
             for (const auto& entry : table_node->data) {
                 if (entry.contains(column) && entry[column].get<string>() == value) {
                     found = true;
-                    cout << "Deleted row: " << entry.dump() << endl;
+                    cout << "Удалена строка: " << entry.dump() << endl;
                 } else {
-                    new_data.push_back(entry); // Сохраняем не удаленные строки
+                    new_data.push_back(entry);
                 }
             }
 
             if (found) {
-                table_node->data = new_data; // Обновляем данные в памяти
-                rewriteCSV(table); // Перезаписываем CSV файл с новыми данными
+                table_node->data = new_data; 
+                rewriteCSV(table); 
             } else {
-                cout << "No row found with " << column << " = " << value << " in table " << table << endl;
+                cout << "Не найдена строка с " << column << " = " << value << " в таблице " << table << endl;
             }
         } else {
-            cout << "Table not found: " << table << endl;
+            cout << "Таблица не найдена: " << table << endl;
         }
     }
 
     void rewriteCSV(const string& table) {
-        filename = schema_name + "\\" + table + "\\1.csv"; // Обновить путь к файлу
-        ofstream file(filename); // Перезаписываем файл
+        filename = schema_name + "\\" + table + "\\1.csv"; 
+        ofstream file(filename); 
 
         if (file) {
-            // Получаем структуру таблицы из схемы
             Node* table_node = findNode(table);
             if (table_node) {
-                // Запись заголовков на основе схемы
-                json columns; // Убираем const
+                json columns = {"name", "age", "adress", "number"};
 
-                if (table == "table1") {
-                    columns = {"name", "age", "adress", "number"};
-                } else if (table == "table2") {
-                    columns = {"name", "age"}; // Пример для другой таблицы
-                }
-
-                // Запись заголовков
                 for (const auto& column : columns) {
-                    file << "| " << setw(10) << left << column.get<string>() << " ";
+                    file << setw(10) << left << column.get<string>() << (column != columns.back() ? ", " : "");
                 }
-                file << "|\n"; // Завершение строки заголовка
+                file << "\n"; 
 
-                // Записываем данные
                 for (const auto& entry : table_node->data) {
                     for (const auto& column : columns) {
-                        file << "| " << setw(10) << left << entry[column.get<string>()].get<string>() << " ";
+                        file << setw(10) << left << entry[column.get<string>()].get<string>() << (column != columns.back() ? ", " : "");
                     }
-                    file << "|\n"; // Завершение строки данных
+                    file << "\n"; 
                 }
             }
             file.close();
         } else {
-            cerr << "Could not open data file for rewriting: " << filename << endl;
+            cerr << "Не удалось открыть файл данных для перезаписи: " << filename << endl;
         }
     }
 };
@@ -356,51 +291,62 @@ void insert(const string& table, const json& entry) {
 void executeQuery(Database& db, const string& query) {
     istringstream iss(query);
     string action;
-    iss >> action; // Читаем действие
+    iss >> action; 
 
     if (action == "INSERT" || action == "insert") {
         string table, name, adress, number;
         int age;
-        iss >> table >> name >> age >> adress >> number; // Извлекаем таблицу и данные
+        iss >> table >> name >> age >> adress >> number; 
         json entry = {{"name", name}, {"age", age}, {"adress", adress}, {"number", number}};
-        db.insert(table, entry); // Вставка данных
+        db.insert(table, entry); 
     } else if (action == "SELECT" || action == "select") {
         string column, from, table;
-        iss >> column >> from >> table; // Извлекаем колонку и таблицу
+        iss >> column >> from >> table; 
         if (from == "FROM") {
-            db.select(column, table); // Выполняем выборку
+            pair<string, string> filters[10]; // Массив для хранения фильтров, фиксированный размер
+            int filter_count = 0; // Счетчик фильтров
+            string filter_part;
+
+            if (iss >> filter_part && filter_part == "WHERE") {
+                string filter_column, filter_value;
+                while (iss >> filter_column) {
+                    string condition;
+                    iss >> condition; 
+                    iss >> filter_value; 
+                    filters[filter_count++] = make_pair(filter_column, filter_value); // Запись фильтра в массив
+
+                    string connector;
+                    iss >> connector; 
+                    if (connector != "AND" && connector != "OR") {
+                        break; 
+                    }
+                }
+            }
+            db.select(column, table, filters, filter_count); // Передаем массив и его размер
         } else {
-            cout << "Invalid query format." << endl;
+            cout << "Неверный формат запроса." << endl;
         }
     } else if (action == "DELETE" || action == "delete") {
         string column, from, value, table;
-        iss >> from >> table >> column >> value; // Извлекаем параметры удаления
-        db.deleteRow(column, value, table); // Удаление строки
+        iss >> from >> table >> column >> value; 
+        db.deleteRow(column, value, table); 
     } else {
-        cout << "Unknown command: " << query << endl;
+        cout << "Неизвестная команда: " << query << endl;
     }
 }
 
 int main(int argc, char* argv[]) {
     Database db;
-    db.loadSchema("schema.json"); // Загрузить схему
+    db.loadSchema("schema.json"); 
+    db.load(); 
 
-    db.load(); // Загрузить данные из CSV
-
-    // Инициализация первичного ключа для каждой таблицы
-    Node* current = db.head;
-    while (current) {
-        db.initializePrimaryKey(current->name); // Инициализация первичного ключа
-        current = current->next;
-    }
-
-    if (argc > 1) {
-        string query = argv[2];
-        executeQuery(db, query); // Выполнение команды
+    if (argc > 2 && string(argv[1]) == "--query") {
+        string query = argv[2]; // Считываем сам запрос
+        executeQuery(db, query); 
     } else {
-        cout << "Please provide a query to execute." << endl;
+        cout << "Пожалуйста, предоставьте запрос для выполнения в формате: --query \"<ваш_запрос>\"." << endl;
     }
 
     return 0;
 }
-
+прокомментируй каждую строчку кода
