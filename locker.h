@@ -1,10 +1,8 @@
-#ifndef LOCKER_HPP
-#define LOCKER_HPP
-
+#pragma once
 #include <iostream>
 #include <fstream>
 #include <string>
-#include "structures.hpp"
+#include "structures.h"
 
 using namespace std;
 
@@ -13,4 +11,3 @@ void unlockPrimaryKey(dbase& db);
 void initializePrimaryKey(dbase& db);
 void updatePrimaryKey(dbase& db);
 
-#endif 
