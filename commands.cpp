@@ -1,11 +1,14 @@
-#include "commands.hpp"
+#include "commands.h"
 #include<iostream>
 #include <fstream>
 #include "json.hpp"
 
+using namespace std;
+
 void insert(dbase& db, const string& table, json entry) {
     Node* table_node = db.findNode(table);
     if (table_node) {
+        // Если количество аргументов совпадает с количеством колонок, продолжаем
         updatePrimaryKey(db); 
         entry["id"] = db.current_pk; 
 
@@ -18,7 +21,7 @@ void insert(dbase& db, const string& table, json entry) {
     }
 }
 
-void select(dbase& db, const string& column, const string& table, const pair<string, string> filters[], int filter_count, const string& filter_type) {
+void select(dbase& db, const string& column, const string& table, const Pars<string, string> filters[], int filter_count, const string& filter_type) {
     Node* table_node = db.findNode(table);
     if (table_node) {
         bool data_found = false;
@@ -83,7 +86,7 @@ void Delete(dbase& db, const string& column, const string& value, const string& 
     }
 }
 
-bool applyAndFilters(const json& entry, const pair<string, string> filters[], int filter_count) {
+bool applyAndFilters(const json& entry, const Pars<string, string> filters[], int filter_count) {
     for (int i = 0; i < filter_count; ++i) {
         const string& filter_column = filters[i].first;
         const string& filter_value = filters[i].second;
@@ -95,7 +98,7 @@ bool applyAndFilters(const json& entry, const pair<string, string> filters[], in
     return true;
 }
 
-bool applyOrFilters(const json& entry, const pair<string, string> filters[], int filter_count) {
+bool applyOrFilters(const json& entry, const Pars<string, string> filters[], int filter_count) {
     for (int i = 0; i < filter_count; ++i) {
         const string& filter_column = filters[i].first;
         const string& filter_value = filters[i].second;
