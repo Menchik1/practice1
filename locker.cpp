@@ -1,11 +1,11 @@
-#include "locker.hpp"
+#include "locker.h"
 #include<iostream>
 #include <fstream>
 #include "json.hpp" 
 
 void lockPrimaryKey(dbase& db) {
     try {
-        string pk_filename = db.schema_name + "\\table_pk_sequence.txt";
+        string pk_filename = db.schema_name + "/table_pk_sequence.txt";
         ofstream pk_file(pk_filename);
         if (pk_file) {
             pk_file << db.current_pk << "\nlocked";
@@ -19,7 +19,7 @@ void lockPrimaryKey(dbase& db) {
 
 void unlockPrimaryKey(dbase& db) {
     try {
-        string pk_filename = db.schema_name + "\\table_pk_sequence.txt";
+        string pk_filename = db.schema_name + "/table_pk_sequence.txt";
         ofstream pk_file(pk_filename);
         if (pk_file) {
             pk_file << db.current_pk << "\nunlocked";
@@ -33,7 +33,7 @@ void unlockPrimaryKey(dbase& db) {
 
 void initializePrimaryKey(dbase& db) {
     try {
-        string pk_filename = db.schema_name + "\\table_pk_sequence.txt";
+        string pk_filename = db.schema_name + "/table_pk_sequence.txt";
         ifstream pk_file(pk_filename);
         
         if (pk_file) {
@@ -54,7 +54,7 @@ void initializePrimaryKey(dbase& db) {
 
 void updatePrimaryKey(dbase& db) {
     try {
-        string pk_filename = db.schema_name + "\\table_pk_sequence.txt";
+        string pk_filename = db.schema_name + "/table_pk_sequence.txt";
 
         ifstream pk_file(pk_filename);
         if (pk_file) {
