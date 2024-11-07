@@ -5,7 +5,6 @@
 #include "json.hpp"
 #include "locker.h"
 #include "fileOperations.h"
-
 using namespace std;
 
 void insert(dbase& db, const string& table, json entry);
