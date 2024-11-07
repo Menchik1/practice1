@@ -1,8 +1,10 @@
-#include "fileOperations.hpp"
+#include "fileOperations.h"
 #include<iostream>
 #include <fstream>
 #include "json.hpp" 
 #include <sys/stat.h>
+#include "locker.h"
+
 void loadSchema(dbase& db, const string& schema_file) {
     try {
         ifstream file(schema_file);
@@ -24,14 +26,20 @@ void loadSchema(dbase& db, const string& schema_file) {
 
 void createDirectories(dbase& db, const json& structure) {
     try {
-        _mkdir(db.schema_name.c_str());
+        // Создаем директорию для схемы
+        if (mkdir(db.schema_name.c_str(), 0777) && errno != EEXIST) {
+            throw runtime_error("Failed to create directory: " + db.schema_name);
+        }
 
         for (const auto& table : structure.items()) {
             string table_name = table.key();
-            string table_path = db.schema_name + "\\" + table_name;
+            string table_path = db.schema_name + "/" + table_name;
 
-            _mkdir(table_path.c_str());
-            db.filename = table_path + "\\1.csv";
+            // Создаем директорию для таблицы
+            if (mkdir(table_path.c_str(), 0777) && errno != EEXIST) {
+                throw runtime_error("Failed to create directory: " + table_path);
+            }
+            db.filename = table_path + "/1.csv";
 
             ifstream check_file(db.filename);
             if (!check_file) {
@@ -45,6 +53,8 @@ void createDirectories(dbase& db, const json& structure) {
                     file.close();
                 }
             }
+
+            initializePrimaryKey(db);
         }
     } catch (const exception& e) {
         cout << "Error: " << e.what() << endl;
@@ -53,13 +63,15 @@ void createDirectories(dbase& db, const json& structure) {
 
 void saveSingleEntryToCSV(dbase& db, const string& table, const json& entry) {
     try {
-        string filename = db.schema_name + "\\" + table + "\\1.csv"; 
+        string filename = db.schema_name + "/" + table + "/1.csv"; 
         ofstream file(filename, ios::app);
         if (file) {
+            // Проверяем, сколько полей есть в JSON-объекте
             if (entry.contains("name") && entry.contains("age")) {
                 file << setw(10) << left << entry["name"].get<string>() << ", "
                      << setw(10) << left << entry["age"];
 
+                // Если таблица имеет дополнительные поля, добавляем их
                 if (db.getColumnCount(table) > 2) {
                     file << ", " << setw(10) << left << entry["adress"].get<string>() << ", ";
                     file << setw(10) << left << entry["number"].get<string>();
@@ -80,7 +92,7 @@ void saveSingleEntryToCSV(dbase& db, const string& table, const json& entry) {
 
 void rewriteCSV(dbase& db, const string& table) {
     try {
-        db.filename = db.schema_name + "\\" + table + "\\1.csv"; 
+        db.filename = db.schema_name + "/" + table + "/1.csv"; 
         ofstream file(db.filename); 
 
         if (file) {
