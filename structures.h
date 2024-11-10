@@ -1,20 +1,29 @@
-#ifndef STRUCTURES_HPP
-#define STRUCTURES_HPP
+#pragma once
 
 #include <iostream>
 #include <string>
 #include <fstream>
 #include "json.hpp" 
+#include <sys/stat.h>
 
 using namespace std;
 using json = nlohmann::json;
+
+template<typename T1, typename T2>
+struct Pars {
+    T1 first;
+    T2 second;
+
+    Pars() : first(T1()), second(T2()) {} 
+    Pars(const T1& f, const T2& s) : first(f), second(s) {}
+};
 
 struct Array {
     string* arr;
     size_t capacity;
     size_t size;
 
-    Array() : capacity(10), size(0) {
+    Array() : capacity(4), size(0) {
         arr = new string[capacity];
     }
 
@@ -24,9 +33,10 @@ struct Array {
 
     void addEnd(const string& value) {
         if (size >= capacity) {
-            capacity *= 2;
             string* new_arr = new string[capacity];
-            copy(arr, arr + size, new_arr);
+            for (size_t i = 0; i < size; ++i) {
+                new_arr[i] = arr[i];
+            }
             delete[] arr;
             arr = new_arr;
         }
@@ -67,7 +77,7 @@ struct dbase {
         }
     }
 
-    Node* findNode(const string& table_name) const {
+    Node* findNode(const string& table_name) {
         Node* current = head;
         while (current) {
             if (current->name == table_name) {
@@ -84,15 +94,18 @@ struct dbase {
         head = new_node;
     }
 
-    size_t getColumnCount(const string& table) const {
+    size_t getColumnCount(const string& table) {
         Node* table_node = findNode(table);
         if (table_node) {
-            string filename = schema_name + "\\" + table + "\\1.csv";
+
+            string filename = schema_name + "/" + table + "/1.csv"; 
             ifstream file(filename);
             if (file) {
                 string header;
                 if (getline(file, header)) {
-                    return count(header.begin(), header.end(), ',') + 1;
+
+                    size_t comma_count = count(header.begin(), header.end(), ',');
+                    return comma_count + 1;
                 }
             }
         }
@@ -103,7 +116,7 @@ struct dbase {
         Node* current = head;
         while (current) {
             try {
-                filename = schema_name + "\\" + current->name + "\\1.csv"; 
+                filename = schema_name + "/" + current->name + "/1.csv"; 
                 ifstream file(filename);
                 if (file) {
                     string line;
@@ -149,5 +162,3 @@ struct dbase {
         }
     }
 };
-
-#endif 
