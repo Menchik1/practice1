@@ -1,10 +1,14 @@
 #pragma once
-
 #include <iostream>
-#include <string>
 #include <fstream>
-#include "json.hpp" 
 #include <sys/stat.h>
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <unistd.h>
+#include <stdexcept>
+#include <cstring>
+#include "json.hpp" 
+#include <sstream> 
 
 using namespace std;
 using json = nlohmann::json;
@@ -14,7 +18,7 @@ struct Pars {
     T1 first;
     T2 second;
 
-    Pars() : first(T1()), second(T2()) {} 
+    Pars() : first(T1()), second(T2()) {} // Конструктор по умолчанию
     Pars(const T1& f, const T2& s) : first(f), second(s) {}
 };
 
@@ -23,7 +27,7 @@ struct Array {
     size_t capacity;
     size_t size;
 
-    Array() : capacity(4), size(0) {
+    Array() : capacity(10), size(0) {
         arr = new string[capacity];
     }
 
@@ -33,6 +37,7 @@ struct Array {
 
     void addEnd(const string& value) {
         if (size >= capacity) {
+            capacity *= 2;
             string* new_arr = new string[capacity];
             for (size_t i = 0; i < size; ++i) {
                 new_arr[i] = arr[i];
@@ -97,15 +102,13 @@ struct dbase {
     size_t getColumnCount(const string& table) {
         Node* table_node = findNode(table);
         if (table_node) {
-
             string filename = schema_name + "/" + table + "/1.csv"; 
             ifstream file(filename);
             if (file) {
                 string header;
                 if (getline(file, header)) {
-
-                    size_t comma_count = count(header.begin(), header.end(), ',');
-                    return comma_count + 1;
+                    size_t comma_count = std::count(header.begin(), header.end(), ',');
+                    return comma_count + 1; // Количество колонок = количество запятых + 1
                 }
             }
         }
