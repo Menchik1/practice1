@@ -1,7 +1,19 @@
-#include "locker.h"
-#include<iostream>
+#include <iostream>
 #include <fstream>
-#include "json.hpp" 
+#include <sys/stat.h> // Для mkdir
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <unistd.h>
+#include <stdexcept>
+#include <cstring> // Для memset
+#include "json.hpp" // Библиотека для работы с JSON
+#include <sstream> // Для istringstream
+#include "structures.h"
+#include "locker.h"
+#include "WorkWithFiles.h"
+
+using namespace std;
+using json = nlohmann::json;
 
 void lockPrimaryKey(dbase& db) {
     try {
