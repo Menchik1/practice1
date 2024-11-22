@@ -12,17 +12,20 @@
 #include "locker.h"
 #include "commands.h"
 #include "server.h"
+#include <mutex>
 
 using namespace std;
 using json = nlohmann::json;
 
-void handleClient(int client_socket, dbase& db) {
+mutex dataM;
+
+void Request(int client_socket, BaseData& bd) {
     char buffer[1024];
     while (true) {
         memset(buffer, 0, sizeof(buffer));
         int bytes_read = read(client_socket, buffer, sizeof(buffer) - 1);
         if (bytes_read <= 0) {
-            break; // Выход из цикла при ошибке или закрытии соединения
+            break;
         }
         string query(buffer);
         istringstream iss(query);
@@ -37,12 +40,11 @@ void handleClient(int client_socket, dbase& db) {
                 Array args;
                 string arg;
 
-                // Чтение всех оставшихся аргументов
                 while (iss >> arg) {
                     args.addEnd(arg);
                 }
 
-                size_t expected_arg_count = db.getColumnCount(table);
+                size_t expected_arg_count = bd.getColumnCount(table);
                 if (args.getSize() > expected_arg_count) {
                     string error_message = "Error: Too many arguments for INSERT command.";
                     send(client_socket, error_message.c_str(), error_message.size(), 0);
@@ -61,16 +63,18 @@ void handleClient(int client_socket, dbase& db) {
                 if (args.getSize() > 2) {
                     entry["adress"] = args.get(2);
                 } else {
-                    entry["adress"] = ""; // Значение по умолчанию
+                    entry["adress"] = ""; 
                 }
 
                 if (args.getSize() > 3) {
                     entry["number"] = args.get(3);
                 } else {
-                    entry["number"] = ""; // Значение по умолчанию
+                    entry["number"] = "";
                 }
-
-                insert(db, table, entry);
+                {
+                    lock_guard<mutex> lock(dataM);
+                    insert(bd, table, entry);
+                }
                 string success_message = "Data successfully inserted.";
                 send(client_socket, success_message.c_str(), success_message.size(), 0);
 
@@ -85,16 +89,21 @@ void handleClient(int client_socket, dbase& db) {
                     Pars<string, string> filter1(filter_column1, filter_value1);
                     Pars<string, string> filter2(filter_column2, filter_value2);
 
-                    // Переменная для хранения результатов
                     stringstream result_stream;
-                    selectFromMultipleTables(db, column, column2, table1, table2, filter1, filter2, WHERE, OPER, tablef,result_stream);
+                    {
+                    lock_guard<mutex> lock(dataM);
+                    selectFromMultipleTables(bd, column, column2, table1, table2, filter1, filter2, WHERE, OPER, tablef,result_stream);
+                    }
                     string result = result_stream.str();
                     send(client_socket, result.c_str(), result.size(), 0);
 
                 } else {
                     string table = tables;
                     stringstream result_stream;
-                    selectFromTable(db, table, {"", ""}); // Передаем пустой фильтр
+                    {
+                    lock_guard<mutex> lock(dataM);
+                    selectFromTable(bd, table, {"", ""}); 
+                    }
                     string result = result_stream.str();
                     send(client_socket, result.c_str(), result.size(), 0);
                 }
@@ -102,7 +111,10 @@ void handleClient(int client_socket, dbase& db) {
             } else if (action == "DELETE") {
                 string column, from, value, table;
                 iss >> from >> table >> column >> value;
-                deleteRow(db, column, value, table);
+                {
+                    lock_guard<mutex> lock(dataM);
+                    deleteRow(bd, column, value, table);
+                }
                 string success_message = "Row deleted successfully.";
                 send(client_socket, success_message.c_str(), success_message.size(), 0);
                 
