@@ -1,9 +1,18 @@
-#include "fileOperations.h"
-#include<iostream>
+#include <iostream>
 #include <fstream>
+#include <sys/stat.h> 
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <unistd.h>
+#include <stdexcept>
+#include <cstring> 
 #include "json.hpp" 
-#include <sys/stat.h>
+#include <sstream>
+#include "structures.h"
 #include "locker.h"
+#include "WorkWithFiles.h"
+using namespace std;
+using json = nlohmann::json;
 
 void loadSchema(dbase& db, const string& schema_file) {
     try {
@@ -23,10 +32,8 @@ void loadSchema(dbase& db, const string& schema_file) {
         cout << "Error: " << e.what() << endl;
     }
 }
-
 void createDirectories(dbase& db, const json& structure) {
     try {
-        // Создаем директорию для схемы
         if (mkdir(db.schema_name.c_str(), 0777) && errno != EEXIST) {
             throw runtime_error("Failed to create directory: " + db.schema_name);
         }
@@ -35,7 +42,6 @@ void createDirectories(dbase& db, const json& structure) {
             string table_name = table.key();
             string table_path = db.schema_name + "/" + table_name;
 
-            // Создаем директорию для таблицы
             if (mkdir(table_path.c_str(), 0777) && errno != EEXIST) {
                 throw runtime_error("Failed to create directory: " + table_path);
             }
@@ -60,22 +66,16 @@ void createDirectories(dbase& db, const json& structure) {
         cout << "Error: " << e.what() << endl;
     }
 }
-
 void saveSingleEntryToCSV(dbase& db, const string& table, const json& entry) {
     try {
         string filename = db.schema_name + "/" + table + "/1.csv"; 
         ofstream file(filename, ios::app);
         if (file) {
-            // Проверяем, сколько полей есть в JSON-объекте
             if (entry.contains("name") && entry.contains("age")) {
                 file << setw(10) << left << entry["name"].get<string>() << ", "
-                     << setw(10) << left << entry["age"];
-
-                // Если таблица имеет дополнительные поля, добавляем их
-                if (db.getColumnCount(table) > 2) {
-                    file << ", " << setw(10) << left << entry["adress"].get<string>() << ", ";
-                    file << setw(10) << left << entry["number"].get<string>();
-                }
+                     << setw(10) << left << entry["age"]
+                     << ", " << setw(10) << left << entry["adress"].get<string>() << ", "
+                     << setw(10) << left << entry["number"].get<string>();
 
                 file << "\n"; 
                 cout << "Data successfully saved for: " << entry.dump() << endl;
@@ -89,7 +89,6 @@ void saveSingleEntryToCSV(dbase& db, const string& table, const json& entry) {
         cout << "Error: " << e.what() << endl;
     }
 }
-
 void rewriteCSV(dbase& db, const string& table) {
     try {
         db.filename = db.schema_name + "/" + table + "/1.csv"; 
